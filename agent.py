@@ -23,26 +23,40 @@ PERSONAS = {
     ),
 }
 
-def build_prompt(persona: str, code: str) -> str:
+def build_prompt(persona: str, code: str, round_num: int, transcript: str = "") -> str:
     description = PERSONAS[persona]
-    return f"""You are a {persona} on a code review panel.
+    base = f"""You are a {persona} on a code review panel.
 
 {description}
 
-Review the code below. Return:
-- Your stance (approve / changes / block)
-- A short "bubble" line (one sentence, spoken like you're at a round table)
-- A list of findings, each with title, severity, location, explanation, and suggested fix
-- Set round = 0 and responding_to = [] (this is your independent first read)
-- Set persona = "{persona}"
-
-Code to review:
+Code under review:
 ```
 {code}
 ```"""
 
-async def run_agent(persona: str, code: str) -> ReviewResponse:
-    prompt = build_prompt(persona, code)
+    if round_num == 0:
+        return base + f"""
+
+This is your INDEPENDENT first read (Round 0). Review the code on its own merits.
+Set round = 0, responding_to = [], and persona = "{persona}"."""
+
+    return base + f"""
+
+=== DEBATE TRANSCRIPT SO FAR ===
+{transcript}
+=== END TRANSCRIPT ===
+
+This is Round {round_num}. You have read what your colleagues said above.
+Rules:
+- If you agree with a point already raised, concede it — do not re-argue it.
+- If you disagree, push back with a specific reason.
+- You MAY change your stance if the debate has convinced you — and you SHOULD if warranted.
+- Keep your bubble short and direct, like you're speaking at a table.
+
+Set round = {round_num}, list what you're responding_to (e.g. ["Security Engineer: ZeroDivisionError point"]), and persona = "{persona}"."""
+
+async def run_agent(persona: str, code: str, round_num: int = 0, transcript: str = "") -> ReviewResponse:
+    prompt = build_prompt(persona, code, round_num, transcript)
     response = await client.aio.models.generate_content(
         model="gemini-2.5-flash",
         contents=prompt,
