@@ -9,6 +9,8 @@ load_dotenv()
 def format_transcript(all_rounds: list[list[ReviewResponse]]) -> str:
     lines = []
     for round_reviews in all_rounds:
+        if not round_reviews:
+            continue
         round_num = round_reviews[0].round
         lines.append(f"\n--- Round {round_num} ---")
         for review in round_reviews:
@@ -25,7 +27,12 @@ async def safe_run_agent(persona: str, code: str, round_num: int, transcript: st
     try:
         return await run_agent(persona, code, round_num=round_num, transcript=transcript, user_argument=user_argument)
     except Exception as e:
-        print(f"  [ERROR] {persona} failed in round {round_num}: {e}")
+        print(f"  [WARN] {persona} retrying round {round_num} after error: {e}")
+    try:
+        await asyncio.sleep(2)
+        return await run_agent(persona, code, round_num=round_num, transcript=transcript, user_argument=user_argument)
+    except Exception as e:
+        print(f"  [ERROR] {persona} failed round {round_num}: {e}")
         return None
 
 async def run_panel(code: str) -> list[list[ReviewResponse]]:
