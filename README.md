@@ -240,6 +240,3 @@ Copy `.env.example` to `.env` and fill in your key before running.
 
 ---
 
-## License
-
-MIT
