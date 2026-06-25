@@ -35,6 +35,17 @@ async def safe_run_agent(persona: str, code: str, round_num: int, transcript: st
         print(f"  [ERROR] {persona} failed round {round_num}: {e}")
         return None
 
+async def _staggered_agent(delay: float, persona: str, code: str, round_num: int, transcript: str = "", user_argument: str = "") -> ReviewResponse | None:
+    if delay:
+        await asyncio.sleep(delay)
+    return await safe_run_agent(persona, code, round_num, transcript, user_argument)
+
+async def gather_agents(personas: list, code: str, round_num: int, transcript: str = "", user_argument: str = "") -> list[ReviewResponse]:
+    results = await asyncio.gather(
+        *[_staggered_agent(i * 0.8, p, code, round_num, transcript, user_argument) for i, p in enumerate(personas)]
+    )
+    return [r for r in results if r is not None]
+
 async def run_panel(code: str) -> list[list[ReviewResponse]]:
     all_rounds = []
 

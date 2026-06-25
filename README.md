@@ -2,18 +2,74 @@
 
 **Three AI engineers independently review your code. You argue back. A manager delivers the final verdict.**
 
-CodeCouncil runs your code through a panel of three AI personas — each with a distinct engineering discipline — who debate its quality, flag issues, and form stances. You then have the chance to counter-argue their findings before an Engineering Manager synthesises all rounds into a final, structured verdict with prioritised action items.
+CodeCouncil runs your code through a panel of three AI personas, each with a distinct engineering discipline, who debate its quality, flag issues, and form stances. You then have the chance to counter-argue their findings before an Engineering Manager synthesises all rounds into a final, structured verdict with prioritised action items.
+
+---
+
+## The Problem
+
+Code review is the highest-leverage step in a shipping cycle, but it's also the most inconsistently applied. A single reviewer brings a single perspective and a single mood. Security issues slip past backend engineers. Maintainability concerns get waved through under deadline pressure. And the author never gets a chance to explain the constraints that shaped their choices before a verdict is delivered.
+
+CodeCouncil targets that gap: what if every review was conducted by specialists across three disciplines simultaneously, and the author could argue back before the final call was made?
+
+---
+
+## Architecture Decisions
+
+**Multi-agent panel over a single model call**
+A single LLM asked to "review code from three angles" collapses into one blended opinion. Separate agents with separate system prompts produce genuinely distinct stances; Alex approves things Sam blocks. The debate only works because the agents start from independent reads.
+
+**Structured output via `response_schema`**
+Every agent returns a typed `ReviewResponse` (findings, stance, bubble, arguments) enforced by Gemini's `response_schema` parameter, not prompt-level instructions. This means the frontend never parses free text; it receives a guaranteed JSON shape that maps directly to TypeScript types. The manager's `ManagerVerdict` follows the same pattern.
+
+**Two-round flow with author rebuttal**
+Round 0 is intentionally isolated; agents don't see each other's output so they can't anchor. Round 1 adds the full transcript plus the author's counter-argument. This mirrors how real code review works: initial read, then discussion. The author's voice is built into the protocol, not tacked on.
+
+**Phase state machine on the frontend**
+`App.tsx` manages the session as a linear phase enum (`landing -> input -> reviewing -> panel -> debating -> verdict`). Each phase maps to one full-screen page. There's no shared context store; data flows down as props. This keeps the flow predictable and eliminates intermediate state bugs.
+
+**Staggered parallel agent calls**
+The three agents fire with a 0.8s offset between each rather than simultaneously. Gemini's API rate limits at the request level; simultaneous calls consistently caused one agent to be dropped. Staggering trades ~1.6s of latency for near-100% agent completion rate.
+
+---
+
+## Google Technology Used
+
+**Gemini 2.5 Flash** powers all four AI agents (Alex, Sam, Jordan, Morgan).
+
+Flash was chosen over Pro for two reasons: latency and cost. A full review cycle involves four sequential or parallel Gemini calls per session. Pro's higher latency would make the interactive debate loop feel slow. Flash's throughput at the task complexity here (structured JSON from a system prompt + code snippet) is more than sufficient; the quality difference only matters for open-ended reasoning, not schema-constrained output.
+
+The `response_schema` feature was the decisive factor for this architecture. Without guaranteed structured output, building a typed multi-agent pipeline would require fragile prompt engineering and JSON parsing fallbacks. With it, each agent's output is a validated Pydantic model from the first call.
+
+---
+
+## What I'd Improve With More Time
+
+**Inter-agent debate in Round 1**
+Currently, Round 1 agents only respond to the author; they don't see each other's Round 1 responses. A third round where agents react to each other's stances would produce richer consensus/dissent and make the manager's job more interesting.
+
+**Streaming responses**
+Each agent call blocks until the full JSON is ready. With streaming + partial JSON parsing, the frontend could render agent cards as they complete rather than waiting for all three. This would cut perceived latency significantly.
+
+**Persistent sessions**
+Review sessions aren't saved. Adding a backend store would let users share a review URL, revisit past sessions, and track stance changes across rounds. Useful for async team workflows.
+
+**Agent memory across files**
+The panel reviews one snippet in isolation. A real review needs project context: what this function is called by, what the surrounding module does, what the existing test coverage looks like. Feeding a repository summary or diff into the prompt would lift review quality substantially.
+
+**Confidence scoring**
+Agents currently commit to a binary block/approve. A calibrated confidence score alongside the stance would let the manager weigh opinions more precisely and surface cases where the panel is genuinely uncertain versus firmly split.
 
 ---
 
 ## How It Works
 
 ```
-1. Submit code       →  Paste directly or upload a file
-2. Panel reviews     →  Alex, Sam & Jordan analyse in parallel (Round 0)
-3. You argue back    →  Counter their findings with your context
-4. Panel reconsiders →  Agents update their stances (Round 1)
-5. Manager decides   →  Final verdict with consensus, dissent & action items
+1. Submit code       ->  Paste directly or upload a file
+2. Panel reviews     ->  Alex, Sam & Jordan analyse in parallel (Round 0)
+3. You argue back    ->  Counter their findings with your context
+4. Panel reconsiders ->  Agents update their stances (Round 1)
+5. Manager decides   ->  Final verdict with consensus, dissent & action items
 ```
 
 ### The Panel
@@ -31,17 +87,17 @@ CodeCouncil runs your code through a panel of three AI personas — each with a 
 
 **Backend**
 - Python 3.11+
-- FastAPI — REST API with async endpoints
-- Google Gemini — powers all four AI agents
-- Pydantic — structured agent output schemas
+- FastAPI: REST API with async endpoints
+- Google Gemini: powers all four AI agents
+- Pydantic: structured agent output schemas
 
 **Frontend**
 - React 18 + TypeScript
-- Vite — build tooling
-- Tailwind CSS v4 — utility-first styling
-- Radix UI — accessible component primitives
-- Motion (Framer Motion) — page transitions and animations
-- pnpm — package manager
+- Vite: build tooling
+- Tailwind CSS v4: utility-first styling
+- Radix UI: accessible component primitives
+- Motion (Framer Motion): page transitions and animations
+- pnpm: package manager
 
 ---
 
@@ -127,14 +183,14 @@ pnpm install
 
 Open two terminals:
 
-**Terminal 1 — Backend**
+**Terminal 1 - Backend**
 ```bash
 source venv/bin/activate
 uvicorn backend.api:app --reload
 # API running at http://localhost:8000
 ```
 
-**Terminal 2 — Frontend**
+**Terminal 2 - Frontend**
 ```bash
 cd frontend
 pnpm dev
@@ -148,14 +204,14 @@ Open [http://localhost:5173](http://localhost:5173) in your browser.
 ## API Reference
 
 ### `POST /api/review`
-Round 0 — all three agents independently review the code.
+Round 0: all three agents independently review the code.
 
 ```json
 { "code": "def foo(): ..." }
 ```
 
 ### `POST /api/debate`
-Round 1 — agents respond to the user's counter-argument.
+Round 1: agents respond to the user's counter-argument.
 
 ```json
 {
@@ -174,53 +230,11 @@ Engineering Manager synthesises all rounds into a final verdict.
 
 ---
 
-## Demo
-
-For a quick demo, paste this code on the Submit page — it has intentional issues across all three disciplines but each one is defensible:
-
-```python
-import hashlib, sqlite3
-from datetime import datetime
-
-SECRET_KEY = "supersecret123"
-
-def authenticate_user(username, password):
-    conn = sqlite3.connect("users.db")
-    cursor = conn.cursor()
-    query = f"SELECT * FROM users WHERE username = '{username}'"
-    cursor.execute(query)
-    user = cursor.fetchone()
-    if not user:
-        return None
-    hashed = hashlib.md5(password.encode()).hexdigest()
-    if user[2] != hashed:
-        return None
-    return {"id": user[0], "username": user[1], "role": user[3]}
-
-def get_user_dashboard(user_id, filters):
-    conn = sqlite3.connect("users.db")
-    cursor = conn.cursor()
-    orders   = cursor.execute(f"SELECT * FROM orders WHERE user_id = {user_id}").fetchall()
-    products = cursor.execute("SELECT * FROM products").fetchall()
-    result = []
-    for order in orders:
-        for product in products:
-            if order[2] == product[0] and product[4] in filters:
-                result.append({"order_id": order[0], "product": product[1],
-                                "price": product[2] * 1.08, "date": order[3]})
-    return result
-```
-
-**Suggested defence:**
-> The username goes through strict alphanumeric regex at the API gateway before reaching this function. MD5 is intentional for this internal ops tool — bcrypt migration is planned next sprint. The SECRET_KEY string is a dev placeholder; prod reads from os.environ. The nested loop is O(≤10,000) by business constraints and runs in under 2ms. The 1.08 multiplier is a fixed jurisdictional tax rate documented in the requirements spec.
-
----
-
 ## Environment Variables
 
 | Variable | Description |
 |---|---|
-| `GEMINI_API_KEY` | Google Gemini API key — required for all AI agents |
+| `GEMINI_API_KEY` | Google Gemini API key, required for all AI agents |
 
 Copy `.env.example` to `.env` and fill in your key before running.
 

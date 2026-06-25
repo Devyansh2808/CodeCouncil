@@ -1,4 +1,3 @@
-import asyncio
 import sys
 import os
 from dotenv import load_dotenv
@@ -9,7 +8,7 @@ from pydantic import BaseModel
 load_dotenv()
 sys.path.insert(0, os.path.dirname(__file__))
 
-from panel import run_panel, format_transcript
+from panel import run_panel, format_transcript, gather_agents
 from agent import run_agent, PERSONAS
 from manager import run_manager
 from schema import ReviewResponse
@@ -46,25 +45,15 @@ def parse_rounds(raw_rounds: list[list[dict]]) -> list[list[ReviewResponse]]:
 @app.post("/api/review")
 async def review(req: ReviewRequest):
     """Round 0: independent reviews from all three agents."""
-    from panel import safe_run_agent
-    results = await asyncio.gather(
-        *[safe_run_agent(persona, req.code, round_num=0) for persona in PERSONAS]
-    )
-    reviews = [r for r in results if r is not None]
+    reviews = await gather_agents(list(PERSONAS.keys()), req.code, round_num=0)
     return {"round_0": [r.model_dump() for r in reviews]}
 
 @app.post("/api/debate")
 async def debate(req: DebateRequest):
     """Round 1: agents respond to user's counter-argument."""
-    from panel import safe_run_agent
     round_0 = [ReviewResponse(**r) for r in req.round_0]
     transcript = format_transcript([round_0])
-
-    results = await asyncio.gather(
-        *[safe_run_agent(persona, req.code, round_num=1, transcript=transcript, user_argument=req.user_argument)
-          for persona in PERSONAS]
-    )
-    reviews = [r for r in results if r is not None]
+    reviews = await gather_agents(list(PERSONAS.keys()), req.code, round_num=1, transcript=transcript, user_argument=req.user_argument)
     return {"round_1": [r.model_dump() for r in reviews]}
 
 @app.post("/api/verdict")
